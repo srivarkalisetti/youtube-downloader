@@ -76,19 +76,37 @@ app.post('/download', (req, res) => {
   ];
 
   let cookieArgs = '';
+  let hasCookies = false;
+  
   if (cookiesBrowser) {
     cookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
-  } else if (cookiesFile && fs.existsSync(cookiesFile)) {
-    cookieArgs = `--cookies ${cookiesFile}`;
+    hasCookies = true;
+  } else if (cookiesFile) {
+    const cookiePath = path.isAbsolute(cookiesFile) ? cookiesFile : path.join(__dirname, cookiesFile);
+    if (fs.existsSync(cookiePath)) {
+      cookieArgs = `--cookies "${cookiePath}"`;
+      hasCookies = true;
+    } else {
+      console.warn(`Cookie file not found: ${cookiePath}`);
+    }
+  }
+  
+  if (!hasCookies) {
+    console.warn('No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_FILE environment variable.');
   }
 
   const buildCommand = (clientIndex) => {
     const client = playerClients[clientIndex];
     let extractorArgs = '';
-    if (!cookieArgs) {
+    let userAgent = client.ua;
+    
+    if (hasCookies) {
+      userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    } else {
       extractorArgs = `--extractor-args "youtube:player_client=${client.name}"`;
     }
-    return `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "${client.ua}" --referer "https://www.youtube.com/" ${cookieArgs} ${extractorArgs} -o "${outputTemplate}" "${url}"`;
+    
+    return `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "${userAgent}" --referer "https://www.youtube.com/" ${cookieArgs} ${extractorArgs} -o "${outputTemplate}" "${url}"`;
   };
 
   let currentClientIndex = 0;
