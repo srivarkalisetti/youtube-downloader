@@ -11,6 +11,71 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
+
+let globalCookieArgs = '';
+const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER || '';
+const cookiesFile = process.env.YTDLP_COOKIES_FILE || '';
+const cookiesBase64 = process.env.YTDLP_COOKIES_BASE64 || '';
+
+if (cookiesBrowser) {
+  globalCookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
+  console.log('Using cookies from browser:', cookiesBrowser);
+} else if (cookiesBase64) {
+  try {
+    const cookiePath = path.join(tempDir, 'cookies.txt');
+    const cleanBase64 = cookiesBase64.replace(/\s+/g, '');
+    const cookieContent = Buffer.from(cleanBase64, 'base64').toString('utf-8');
+    
+    if (!cookieContent.startsWith('# Netscape HTTP Cookie File')) {
+      console.error('ERROR: Decoded cookies do not appear to be in Netscape format');
+      console.error('First 200 chars:', cookieContent.substring(0, 200));
+      console.error('Base64 length:', cleanBase64.length);
+      console.error('Decoded length:', cookieContent.length);
+    } else {
+      console.log('Cookies decoded successfully, format verified');
+    }
+    
+    fs.writeFileSync(cookiePath, cookieContent, { encoding: 'utf8', mode: 0o644 });
+    
+    if (!fs.existsSync(cookiePath)) {
+      throw new Error('Cookie file was not created');
+    }
+    
+    const stats = fs.statSync(cookiePath);
+    console.log(`Cookie file created at startup: ${cookiePath} (${stats.size} bytes)`);
+    
+    const verifyContent = fs.readFileSync(cookiePath, 'utf8');
+    if (!verifyContent.startsWith('# Netscape HTTP Cookie File')) {
+      throw new Error('Written cookie file does not have correct format');
+    }
+    
+    const youtubeCookies = verifyContent.split('\n').filter(line => line.includes('youtube.com')).length;
+    console.log(`Found ${youtubeCookies} YouTube cookies in file`);
+    
+    globalCookieArgs = `--cookies "${cookiePath}"`;
+    console.log('Cookies loaded from base64 environment variable at startup');
+  } catch (err) {
+    console.error('ERROR: Failed to decode cookies from base64 at startup:', err);
+    console.error('Error stack:', err.stack);
+  }
+} else if (cookiesFile) {
+  const cookiePath = path.isAbsolute(cookiesFile) ? cookiesFile : path.join(__dirname, cookiesFile);
+  if (fs.existsSync(cookiePath)) {
+    globalCookieArgs = `--cookies "${cookiePath}"`;
+    console.log('Using cookies from file:', cookiePath);
+  } else {
+    console.warn(`Cookie file not found: ${cookiePath}`);
+  }
+}
+
+if (!globalCookieArgs) {
+  console.warn('WARNING: No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_BASE64 or YTDLP_COOKIES_FILE environment variable.');
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
@@ -30,13 +95,8 @@ app.post('/download', (req, res) => {
 
     console.log(`Starting download for URL: ${url}`);
 
-  const tempDir = path.join(__dirname, 'temp');
   const timestamp = Date.now();
   const outputTemplate = path.join(tempDir, `audio_${timestamp}.%(ext)s`);
-
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
 
   let ytdlpPath = process.env.YTDLP_PATH;
   
@@ -60,10 +120,6 @@ app.post('/download', (req, res) => {
     ytdlpPath = 'yt-dlp';
   }
 
-  const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER || '';
-  const cookiesFile = process.env.YTDLP_COOKIES_FILE || '';
-  const cookiesBase64 = process.env.YTDLP_COOKIES_BASE64 || '';
-  
   let isResponseSent = false;
   let childProcess;
   let isProcessComplete = false;
@@ -76,46 +132,8 @@ app.post('/download', (req, res) => {
     { name: 'mweb', ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1' }
   ];
 
-  let cookieArgs = '';
-  let hasCookies = false;
-  
-  if (cookiesBrowser) {
-    cookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
-    hasCookies = true;
-  } else if (cookiesBase64) {
-    try {
-      const cookiePath = path.join(__dirname, 'temp', 'cookies.txt');
-      if (!fs.existsSync(path.dirname(cookiePath))) {
-        fs.mkdirSync(path.dirname(cookiePath), { recursive: true });
-      }
-      const cleanBase64 = cookiesBase64.replace(/\s+/g, '');
-      const cookieContent = Buffer.from(cleanBase64, 'base64').toString('utf-8');
-      
-      if (!cookieContent.startsWith('# Netscape HTTP Cookie File')) {
-        console.error('Decoded cookies do not appear to be in Netscape format');
-        console.error('First 100 chars:', cookieContent.substring(0, 100));
-      }
-      
-      fs.writeFileSync(cookiePath, cookieContent, 'utf8');
-      cookieArgs = `--cookies "${cookiePath}"`;
-      hasCookies = true;
-      console.log('Cookies loaded from base64 environment variable');
-    } catch (err) {
-      console.error('Failed to decode cookies from base64:', err);
-    }
-  } else if (cookiesFile) {
-    const cookiePath = path.isAbsolute(cookiesFile) ? cookiesFile : path.join(__dirname, cookiesFile);
-    if (fs.existsSync(cookiePath)) {
-      cookieArgs = `--cookies "${cookiePath}"`;
-      hasCookies = true;
-    } else {
-      console.warn(`Cookie file not found: ${cookiePath}`);
-    }
-  }
-  
-  if (!hasCookies) {
-    console.warn('No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_BASE64 or YTDLP_COOKIES_FILE environment variable.');
-  }
+  const cookieArgs = globalCookieArgs;
+  const hasCookies = !!cookieArgs;
 
   const buildCommand = (clientIndex) => {
     const client = playerClients[clientIndex];
