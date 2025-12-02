@@ -88,8 +88,15 @@ app.post('/download', (req, res) => {
       if (!fs.existsSync(path.dirname(cookiePath))) {
         fs.mkdirSync(path.dirname(cookiePath), { recursive: true });
       }
-      const cookieContent = Buffer.from(cookiesBase64, 'base64').toString('utf-8');
-      fs.writeFileSync(cookiePath, cookieContent);
+      const cleanBase64 = cookiesBase64.replace(/\s+/g, '');
+      const cookieContent = Buffer.from(cleanBase64, 'base64').toString('utf-8');
+      
+      if (!cookieContent.startsWith('# Netscape HTTP Cookie File')) {
+        console.error('Decoded cookies do not appear to be in Netscape format');
+        console.error('First 100 chars:', cookieContent.substring(0, 100));
+      }
+      
+      fs.writeFileSync(cookiePath, cookieContent, 'utf8');
       cookieArgs = `--cookies "${cookiePath}"`;
       hasCookies = true;
       console.log('Cookies loaded from base64 environment variable');
