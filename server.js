@@ -25,44 +25,72 @@ if (cookiesBrowser) {
   globalCookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
   console.log('Using cookies from browser:', cookiesBrowser);
 } else if (cookiesBase64) {
-  try {
-    const cookiePath = path.join(tempDir, 'cookies.txt');
-    const cleanBase64 = cookiesBase64.replace(/\s+/g, '');
-    const cookieContent = Buffer.from(cleanBase64, 'base64').toString('utf-8');
-    
-    if (!cookieContent.startsWith('# Netscape HTTP Cookie File')) {
-      console.error('ERROR: Decoded cookies do not appear to be in Netscape format');
-      console.error('First 200 chars:', cookieContent.substring(0, 200));
-      console.error('Base64 length:', cleanBase64.length);
-      console.error('Decoded length:', cookieContent.length);
-    } else {
+    try {
+      const cookiePath = path.join(tempDir, 'cookies.txt');
+      
+      console.log('Attempting to decode cookies from base64...');
+      console.log('Base64 string length:', cookiesBase64.length);
+      console.log('First 50 chars of base64:', cookiesBase64.substring(0, 50));
+      console.log('Last 50 chars of base64:', cookiesBase64.substring(Math.max(0, cookiesBase64.length - 50)));
+      
+      const cleanBase64 = cookiesBase64.replace(/\s+/g, '').trim();
+      console.log('Cleaned base64 length:', cleanBase64.length);
+      
+      if (cleanBase64.length === 0) {
+        throw new Error('Base64 string is empty after cleaning');
+      }
+      
+      let cookieContent;
+      try {
+        cookieContent = Buffer.from(cleanBase64, 'base64').toString('utf-8');
+      } catch (decodeErr) {
+        console.error('Base64 decode error:', decodeErr.message);
+        throw new Error(`Failed to decode base64: ${decodeErr.message}`);
+      }
+      
+      console.log('Decoded content length:', cookieContent.length);
+      console.log('First 100 chars of decoded:', cookieContent.substring(0, 100));
+      
+      if (!cookieContent || cookieContent.length === 0) {
+        throw new Error('Decoded content is empty');
+      }
+      
+      if (!cookieContent.startsWith('# Netscape HTTP Cookie File')) {
+        console.error('ERROR: Decoded cookies do not appear to be in Netscape format');
+        console.error('First 500 chars:', cookieContent.substring(0, 500));
+        console.error('Base64 length:', cleanBase64.length);
+        console.error('Decoded length:', cookieContent.length);
+        throw new Error('Decoded content does not start with Netscape cookie file header. First 100 chars: ' + cookieContent.substring(0, 100));
+      }
+      
       console.log('Cookies decoded successfully, format verified');
+      
+      fs.writeFileSync(cookiePath, cookieContent, { encoding: 'utf8', mode: 0o644 });
+      
+      if (!fs.existsSync(cookiePath)) {
+        throw new Error('Cookie file was not created');
+      }
+      
+      const stats = fs.statSync(cookiePath);
+      console.log(`Cookie file created at startup: ${cookiePath} (${stats.size} bytes)`);
+      
+      const verifyContent = fs.readFileSync(cookiePath, 'utf8');
+      if (!verifyContent.startsWith('# Netscape HTTP Cookie File')) {
+        console.error('Verification failed. File content first 200 chars:', verifyContent.substring(0, 200));
+        throw new Error('Written cookie file does not have correct format');
+      }
+      
+      const youtubeCookies = verifyContent.split('\n').filter(line => line.includes('youtube.com')).length;
+      console.log(`Found ${youtubeCookies} YouTube cookies in file`);
+      
+      globalCookieArgs = `--cookies "${cookiePath}"`;
+      console.log('Cookies loaded from base64 environment variable at startup');
+    } catch (err) {
+      console.error('ERROR: Failed to decode cookies from base64 at startup:', err.message);
+      console.error('Error stack:', err.stack);
+      globalCookieArgs = '';
     }
-    
-    fs.writeFileSync(cookiePath, cookieContent, { encoding: 'utf8', mode: 0o644 });
-    
-    if (!fs.existsSync(cookiePath)) {
-      throw new Error('Cookie file was not created');
-    }
-    
-    const stats = fs.statSync(cookiePath);
-    console.log(`Cookie file created at startup: ${cookiePath} (${stats.size} bytes)`);
-    
-    const verifyContent = fs.readFileSync(cookiePath, 'utf8');
-    if (!verifyContent.startsWith('# Netscape HTTP Cookie File')) {
-      throw new Error('Written cookie file does not have correct format');
-    }
-    
-    const youtubeCookies = verifyContent.split('\n').filter(line => line.includes('youtube.com')).length;
-    console.log(`Found ${youtubeCookies} YouTube cookies in file`);
-    
-    globalCookieArgs = `--cookies "${cookiePath}"`;
-    console.log('Cookies loaded from base64 environment variable at startup');
-  } catch (err) {
-    console.error('ERROR: Failed to decode cookies from base64 at startup:', err);
-    console.error('Error stack:', err.stack);
-  }
-} else if (cookiesFile) {
+  } else if (cookiesFile) {
   const cookiePath = path.isAbsolute(cookiesFile) ? cookiesFile : path.join(__dirname, cookiesFile);
   if (fs.existsSync(cookiePath)) {
     globalCookieArgs = `--cookies "${cookiePath}"`;
