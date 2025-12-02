@@ -3,5 +3,7 @@ temp/
 *.wav
 .env
 .DS_Store
+downloads
+downloads.pub
 
 
