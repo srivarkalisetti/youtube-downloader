@@ -62,6 +62,7 @@ app.post('/download', (req, res) => {
 
   const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER || '';
   const cookiesFile = process.env.YTDLP_COOKIES_FILE || '';
+  const cookiesBase64 = process.env.YTDLP_COOKIES_BASE64 || '';
   
   let isResponseSent = false;
   let childProcess;
@@ -81,6 +82,20 @@ app.post('/download', (req, res) => {
   if (cookiesBrowser) {
     cookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
     hasCookies = true;
+  } else if (cookiesBase64) {
+    try {
+      const cookiePath = path.join(__dirname, 'temp', 'cookies.txt');
+      if (!fs.existsSync(path.dirname(cookiePath))) {
+        fs.mkdirSync(path.dirname(cookiePath), { recursive: true });
+      }
+      const cookieContent = Buffer.from(cookiesBase64, 'base64').toString('utf-8');
+      fs.writeFileSync(cookiePath, cookieContent);
+      cookieArgs = `--cookies "${cookiePath}"`;
+      hasCookies = true;
+      console.log('Cookies loaded from base64 environment variable');
+    } catch (err) {
+      console.error('Failed to decode cookies from base64:', err);
+    }
   } else if (cookiesFile) {
     const cookiePath = path.isAbsolute(cookiesFile) ? cookiesFile : path.join(__dirname, cookiesFile);
     if (fs.existsSync(cookiePath)) {
@@ -92,7 +107,7 @@ app.post('/download', (req, res) => {
   }
   
   if (!hasCookies) {
-    console.warn('No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_FILE environment variable.');
+    console.warn('No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_BASE64 or YTDLP_COOKIES_FILE environment variable.');
   }
 
   const buildCommand = (clientIndex) => {
