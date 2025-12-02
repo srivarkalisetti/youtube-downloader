@@ -63,23 +63,35 @@ app.post('/download', (req, res) => {
   const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER || '';
   const cookiesFile = process.env.YTDLP_COOKIES_FILE || '';
   
+  let isResponseSent = false;
+  let childProcess;
+  let isProcessComplete = false;
+  let videoTitle = 'audio';
+
+  const playerClients = [
+    { name: 'ios', ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' },
+    { name: 'android', ua: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip' },
+    { name: 'web', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    { name: 'mweb', ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1' }
+  ];
+
   let cookieArgs = '';
   if (cookiesBrowser) {
     cookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
   } else if (cookiesFile && fs.existsSync(cookiesFile)) {
     cookieArgs = `--cookies ${cookiesFile}`;
-  } else {
-    cookieArgs = '--extractor-args "youtube:player_client=android"';
   }
 
-  const command = `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ${cookieArgs} -o "${outputTemplate}" "${url}"`;
-  let videoTitle = 'audio';
+  const buildCommand = (clientIndex) => {
+    const client = playerClients[clientIndex];
+    let extractorArgs = '';
+    if (!cookieArgs) {
+      extractorArgs = `--extractor-args "youtube:player_client=${client.name}"`;
+    }
+    return `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "${client.ua}" --referer "https://www.youtube.com/" ${cookieArgs} ${extractorArgs} -o "${outputTemplate}" "${url}"`;
+  };
 
-  console.log(`Executing: ${command}`);
-
-  let isResponseSent = false;
-  let childProcess;
-  let isProcessComplete = false;
+  let currentClientIndex = 0;
 
   const cleanup = () => {
     if (childProcess && !childProcess.killed && !isProcessComplete) {
@@ -116,21 +128,53 @@ app.post('/download', (req, res) => {
     }
   }, 300000);
 
-  console.log(`Starting download at ${new Date().toISOString()}`);
-  childProcess = exec(command, { maxBuffer: 100 * 1024 * 1024, timeout: 300000 }, (error, stdout, stderr) => {
-    isProcessComplete = true;
-    clearTimeout(requestTimeout);
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`yt-dlp process completed in ${elapsed} seconds`);
+  const setupProcessHandlers = (proc) => {
+    proc.stdout.on('data', (data) => {
+      console.log(`yt-dlp stdout: ${data}`);
+    });
 
-    if (error) {
+    proc.stderr.on('data', (data) => {
+      console.log(`yt-dlp stderr: ${data}`);
+    });
+
+    proc.on('error', (err) => {
+      console.error('Child process error:', err);
+      if (!isResponseSent) {
+        sendError(`Failed to start download process: ${err.message}`);
+      }
+    });
+  };
+
+  const executeDownload = (clientIdx) => {
+    const cmd = buildCommand(clientIdx);
+    console.log(`Executing with ${playerClients[clientIdx].name} client: ${cmd}`);
+    
+    const proc = exec(cmd, { maxBuffer: 100 * 1024 * 1024, timeout: 300000 }, (error, stdout, stderr) => {
+      isProcessComplete = true;
+      clearTimeout(requestTimeout);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.error(`yt-dlp FAILED after ${elapsed} seconds`);
-      console.error(`yt-dlp error code: ${error.code}`);
-      console.error(`yt-dlp error signal: ${error.signal}`);
-      console.error(`yt-dlp error message: ${error.message}`);
-      console.error(`yt-dlp stdout: ${stdout || '(empty)'}`);
-      console.error(`yt-dlp stderr: ${stderr || '(empty)'}`);
+      console.log(`yt-dlp process completed in ${elapsed} seconds`);
+
+      if (error) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.error(`yt-dlp FAILED after ${elapsed} seconds`);
+        console.error(`yt-dlp error code: ${error.code}`);
+        console.error(`yt-dlp error signal: ${error.signal}`);
+        console.error(`yt-dlp error message: ${error.message}`);
+        console.error(`yt-dlp stdout: ${stdout || '(empty)'}`);
+        console.error(`yt-dlp stderr: ${stderr || '(empty)'}`);
+        
+        const isBotError = stderr && (stderr.includes('Sign in to confirm') || stderr.includes('bot') || stderr.includes('cookies'));
+        
+        if (isBotError && !cookieArgs && clientIdx < playerClients.length - 1) {
+          const nextIdx = clientIdx + 1;
+          console.log(`Bot detection error, trying ${playerClients[nextIdx].name} client...`);
+          
+          isProcessComplete = false;
+          childProcess = executeDownload(nextIdx);
+          setupProcessHandlers(childProcess);
+          return;
+        }
       
       if (!isResponseSent) {
         let errorMsg = 'Failed to download audio';
@@ -212,7 +256,11 @@ app.post('/download', (req, res) => {
         if (!isResponseSent && !res.headersSent) {
           isResponseSent = true;
           
-          const titleCommand = `${ytdlpPath} --get-title --no-playlist ${cookieArgs} "${url}"`;
+          let titleExtractorArgs = '';
+          if (!cookieArgs) {
+            titleExtractorArgs = `--extractor-args "youtube:player_client=${playerClients[clientIdx].name}"`;
+          }
+          const titleCommand = `${ytdlpPath} --get-title --no-playlist ${cookieArgs} ${titleExtractorArgs} "${url}"`;
           exec(titleCommand, { timeout: 10000 }, (titleError, titleStdout) => {
             if (!titleError && titleStdout) {
               videoTitle = titleStdout.trim().replace(/[^\w\s-]/g, '_').substring(0, 100);
@@ -242,23 +290,15 @@ app.post('/download', (req, res) => {
       }
     };
 
-    findAndSendFile();
-  });
+      findAndSendFile();
+    });
+    
+    return proc;
+  };
 
-  childProcess.stdout.on('data', (data) => {
-    console.log(`yt-dlp stdout: ${data}`);
-  });
-
-  childProcess.stderr.on('data', (data) => {
-    console.log(`yt-dlp stderr: ${data}`);
-  });
-
-  childProcess.on('error', (err) => {
-    console.error('Child process error:', err);
-    if (!isResponseSent) {
-      sendError(`Failed to start download process: ${err.message}`);
-    }
-  });
+  console.log(`Starting download at ${new Date().toISOString()}`);
+  childProcess = executeDownload(currentClientIndex);
+  setupProcessHandlers(childProcess);
   } catch (err) {
     console.error('Error in /download route:', err);
     if (!res.headersSent) {
