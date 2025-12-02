@@ -60,7 +60,7 @@ app.post('/download', (req, res) => {
     ytdlpPath = 'yt-dlp';
   }
 
-  const command = `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings -o "${outputTemplate}" "${url}"`;
+  const command = `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" --extractor-args "youtube:player_client=android" -o "${outputTemplate}" "${url}"`;
   let videoTitle = 'audio';
 
   console.log(`Executing: ${command}`);
