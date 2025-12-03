@@ -129,8 +129,23 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+let lastDownloadTime = 0;
+const MIN_DOWNLOAD_INTERVAL = 5000;
+
 app.post('/download', (req, res) => {
   try {
+    const now = Date.now();
+    const timeSinceLastDownload = now - lastDownloadTime;
+    
+    if (timeSinceLastDownload < MIN_DOWNLOAD_INTERVAL) {
+      const waitTime = ((MIN_DOWNLOAD_INTERVAL - timeSinceLastDownload) / 1000).toFixed(1);
+      return res.status(429).json({ 
+        error: `Rate limit: Please wait ${waitTime} seconds between downloads to avoid YouTube rate limits` 
+      });
+    }
+    
+    lastDownloadTime = now;
+    
     let { url } = req.body;
 
     if (!url) {
