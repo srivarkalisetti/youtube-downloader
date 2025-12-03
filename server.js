@@ -19,7 +19,20 @@ if (!fs.existsSync(tempDir)) {
 let globalCookieArgs = '';
 const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER || '';
 const cookiesFile = process.env.YTDLP_COOKIES_FILE || '';
-const cookiesBase64 = process.env.YTDLP_COOKIES_BASE64 || '';
+let cookiesBase64 = process.env.YTDLP_COOKIES_BASE64 || '';
+
+if (!cookiesBase64) {
+  const chunks = [];
+  let i = 1;
+  while (process.env[`YTDLP_COOKIES_BASE64_${i}`]) {
+    chunks.push(process.env[`YTDLP_COOKIES_BASE64_${i}`]);
+    i++;
+  }
+  if (chunks.length > 0) {
+    cookiesBase64 = chunks.join('');
+    console.log(`Reconstructed base64 from ${chunks.length} chunks`);
+  }
+}
 
 if (cookiesBrowser) {
   globalCookieArgs = `--cookies-from-browser ${cookiesBrowser}`;
