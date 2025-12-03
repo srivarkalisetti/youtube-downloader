@@ -121,6 +121,8 @@ if (cookiesBrowser) {
 
 if (!globalCookieArgs) {
   console.warn('WARNING: No cookies configured. Bot detection may occur. Set YTDLP_COOKIES_BASE64 or YTDLP_COOKIES_FILE environment variable.');
+} else {
+  console.log('✓ Cookie arguments configured:', globalCookieArgs.substring(0, 100) + '...');
 }
 
 app.get('/health', (req, res) => {
@@ -271,14 +273,24 @@ app.post('/download', (req, res) => {
         
         const isBotError = stderr && (stderr.includes('Sign in to confirm') || stderr.includes('bot') || stderr.includes('cookies'));
         
-        if (isBotError && !cookieArgs && clientIdx < playerClients.length - 1) {
-          const nextIdx = clientIdx + 1;
-          console.log(`Bot detection error, trying ${playerClients[nextIdx].name} client...`);
-          
-          isProcessComplete = false;
-          childProcess = executeDownload(nextIdx);
-          setupProcessHandlers(childProcess);
-          return;
+        if (isBotError) {
+          if (cookieArgs) {
+            console.error('ERROR: Bot detection occurred even with cookies!');
+            console.error('This usually means:');
+            console.error('  1. Cookies are expired or invalid');
+            console.error('  2. Cookies were not exported correctly (need incognito window method)');
+            console.error('  3. YouTube rotated the cookies');
+            console.error('Cookie args used:', cookieArgs);
+            console.error('Please re-export cookies using: ./export-cookies.sh');
+          } else if (clientIdx < playerClients.length - 1) {
+            const nextIdx = clientIdx + 1;
+            console.log(`Bot detection error, trying ${playerClients[nextIdx].name} client...`);
+            
+            isProcessComplete = false;
+            childProcess = executeDownload(nextIdx);
+            setupProcessHandlers(childProcess);
+            return;
+          }
         }
       
       if (!isResponseSent) {
