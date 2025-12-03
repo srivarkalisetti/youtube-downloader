@@ -98,6 +98,12 @@ if (cookiesBrowser) {
   } else {
     console.warn(`Cookie file not found: ${cookiePath}`);
   }
+} else {
+  const defaultCookiePath = path.join(__dirname, 'cookies.txt');
+  if (fs.existsSync(defaultCookiePath)) {
+    globalCookieArgs = `--cookies "${defaultCookiePath}"`;
+    console.log('Using cookies from default location:', defaultCookiePath);
+  }
 }
 
 if (!globalCookieArgs) {

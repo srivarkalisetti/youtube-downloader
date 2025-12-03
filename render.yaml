@@ -6,9 +6,16 @@ services:
     dockerContext: .
     plan: free
     healthCheckPath: /health
+    buildCommand: |
+      if [ -n "$YTDLP_COOKIES_BASE64" ]; then
+        echo "$YTDLP_COOKIES_BASE64" | base64 -d > cookies.txt
+        echo "Cookies file created from base64"
+      fi
     envVars:
       - key: PORT
         value: 3000
       - key: NODE_ENV
         value: production
+      - key: YTDLP_COOKIES_FILE
+        value: /app/cookies.txt
 
