@@ -187,12 +187,14 @@ app.post('/download', (req, res) => {
   const buildCommand = (clientIndex) => {
     const client = playerClients[clientIndex];
     let extractorArgs = '';
-    let userAgent = client.ua;
+    let userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     
     if (hasCookies) {
-      userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      extractorArgs = `--extractor-args "youtube:player_client=web"`;
+      console.log(`Using cookies with web player client. Cookie args: ${cookieArgs}`);
     } else {
       extractorArgs = `--extractor-args "youtube:player_client=${client.name}"`;
+      userAgent = client.ua;
     }
     
     return `${ytdlpPath} -f "bestaudio" -x --audio-format wav --no-playlist --postprocessor-args "ffmpeg:-acodec pcm_s16le -ar 44100 -threads 0 -preset ultrafast" --no-warnings --user-agent "${userAgent}" --referer "https://www.youtube.com/" ${cookieArgs} ${extractorArgs} -o "${outputTemplate}" "${url}"`;
@@ -254,7 +256,12 @@ app.post('/download', (req, res) => {
 
   const executeDownload = (clientIdx) => {
     const cmd = buildCommand(clientIdx);
-    console.log(`Executing with ${playerClients[clientIdx].name} client: ${cmd}`);
+    console.log(`Executing download command:`);
+    console.log(`  Cookies: ${hasCookies ? 'YES' : 'NO'}`);
+    if (hasCookies) {
+      console.log(`  Cookie file: ${cookieArgs}`);
+    }
+    console.log(`  Command: ${cmd.substring(0, 200)}...`);
     
     const proc = exec(cmd, { maxBuffer: 100 * 1024 * 1024, timeout: 300000 }, (error, stdout, stderr) => {
       isProcessComplete = true;
@@ -280,7 +287,29 @@ app.post('/download', (req, res) => {
             console.error('  1. Cookies are expired or invalid');
             console.error('  2. Cookies were not exported correctly (need incognito window method)');
             console.error('  3. YouTube rotated the cookies');
+            console.error('  4. Cookie file path is incorrect or file is missing');
             console.error('Cookie args used:', cookieArgs);
+            
+            if (cookieArgs.includes('--cookies')) {
+              const cookiePathMatch = cookieArgs.match(/--cookies\s+"([^"]+)"/);
+              if (cookiePathMatch) {
+                const cookiePath = cookiePathMatch[1];
+                console.error('Cookie file path:', cookiePath);
+                try {
+                  if (fs.existsSync(cookiePath)) {
+                    const stats = fs.statSync(cookiePath);
+                    const content = fs.readFileSync(cookiePath, 'utf8');
+                    const youtubeCookies = content.split('\n').filter(line => line.includes('youtube.com')).length;
+                    console.error(`Cookie file exists: YES (${stats.size} bytes, ${youtubeCookies} YouTube cookies)`);
+                  } else {
+                    console.error('Cookie file exists: NO');
+                  }
+                } catch (err) {
+                  console.error('Error checking cookie file:', err.message);
+                }
+              }
+            }
+            
             console.error('Please re-export cookies using: ./export-cookies.sh');
           } else if (clientIdx < playerClients.length - 1) {
             const nextIdx = clientIdx + 1;
